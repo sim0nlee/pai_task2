@@ -289,61 +289,9 @@ class MNISTNet(nn.Module):
         return class_probs
 
 
-# class SelfMadeNetwork(nn.Module):
-#
-#     # From https://allofyourbases.com/2020/11/09/hinton-mnist-dropout-in-pytorch/
-#
-#     def __init__(self,
-#                  in_features=28*28,
-#                  out_features=10,
-#                  hid_features=800,
-#                  hid_dropout_p=0.5,
-#                  input_dropout_p=0.2
-#                  ):
-#         super().__init__()
-#         # TODO General_3: Play around with the network structure.
-#         # You can customize your own model here.
-#         self.h1 = nn.Linear(in_features, hid_features)
-#         self.h2 = nn.Linear(hid_features, hid_features)
-#         self.out = nn.Linear(hid_features, out_features)
-#         self.dr1 = nn.Dropout(p=hid_dropout_p)
-#         self.dr2 = nn.Dropout(p=input_dropout_p)
-#
-#         # Weight initialization following a zero-mean normal distribution with sigma = 0.01
-#         for m in self.modules():
-#             if isinstance(m, nn.Linear):
-#                 nn.init.normal_(m.weight, 0, 0.01)
-#                 nn.init.constant_(m.bias, 0)
-#
-#
-#     # def forward(self, x, dropout_at_eval):
-#     #     # 'training' is set to True so that dropout is applied during testing as well
-#     #     x = F.dropout(x, p=0.2, training=dropout_at_eval)
-#     #     x = F.dropout(F.relu(self.h1(x)), p=0.5, training=dropout_at_eval)
-#     #     x = F.dropout(F.relu(self.h2(x)), p=0.5, training=True)
-#     #     x = self.out(x)
-#     #
-#     #     return F.softmax(x, dim=1)
-#
-#     def forward(self, x):
-#         x = self.dr2(x)
-#         x = F.relu(self.h1(x))
-#         x = self.dr1(x)
-#         x = F.relu(self.h2(x))
-#         x = self.dr1(x)
-#         x = self.out(x)
-#         return F.softmax(x, dim=1)
-
-
 class SelfMadeNetwork(nn.Module):
 
-    def __init__(self,
-                 in_features=28*28,
-                 out_features=10,
-                 hid_features=800,
-                 hid_dropout_p=0.5,
-                 input_dropout_p=0.2
-                 ):
+    def __init__(self):
         super().__init__()
         # TODO General_3: Play around with the network structure.
         # You can customize your own model here.
@@ -363,155 +311,6 @@ class SelfMadeNetwork(nn.Module):
         x = x.reshape((-1, 1, 28, 28))
         return self.model(x)
 
-
-# [START] SGDHinton custom optimizer and custom learning rate and momentum getters
-
-class SGDHinton(Optimizer):
-
-    def __init__(self, params, lr, momentum=0.0, l2_limit=15.):
-        if lr < 0.0:
-            raise ValueError("Invalid learning rate: {}".format(lr))
-        if momentum < 0.0:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
-        if l2_limit < 0.0:
-            raise ValueError("Invalid L2 threshold value: {}".format(l2_limit))
-
-        defaults = dict(lr=lr, momentum=momentum, l2_limit=l2_limit)
-        super(SGDHinton, self).__init__(params, defaults)
-
-    def __setstate__(self, state):
-        super(SGDHinton, self).__setstate__(state)
-        for group in self.param_groups:
-            group.setdefault('nesterov', False)
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            momentum = group['momentum']
-            learning_rate = group['lr']
-            l2_limit = group['l2_limit']
-
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                d_p = p.grad
-                renorm = torch.ones(p.size())
-                renorm = renorm.to(device)
-                if momentum != 0:
-                    param_state = self.state[p]
-                    if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
-                    else:
-                        buf = param_state['momentum_buffer']
-
-                        alpha = learning_rate * (1 - momentum)
-                        buf.mul_(momentum).add_(d_p, alpha=-1. * alpha)
-
-                        p_tmp = torch.clone(p).detach()
-
-                        if l2_limit > 0 and len(p_tmp.size()) > 1:
-                            l2_norm = [torch.sqrt(torch.sum(p_tmp[i, :] ** 2)) for i in range(p_tmp.size(0))]
-
-                            for i in range(p_tmp.size(0)):
-                                if l2_norm[i].item() > l2_limit:
-                                    renorm[i, :] = l2_limit / l2_norm[i].item()
-
-                        d_p = buf
-
-                p.add_(d_p, alpha=1.).mul_(renorm)
-
-        return loss
-
-def get_lr(epoch, lr0, gamma):
-    return lr0 * gamma ** epoch
-
-def get_momentum(epoch, p_i, p_f, T):
-    if epoch < T:
-        p = (epoch / T) * p_f + (1 - (epoch / T)) * p_i
-    else:
-        p = p_f
-    return p
-
-# [END] SGDHinton custom optimizer and custom learning rate and momentum getters
-
-
-# class DropoutTrainer(Framework):
-#     def __init__(self, dataset_train,
-#                  *args, **kwargs):
-#         super().__init__(dataset_train, *args, **kwargs)
-#
-#         # Hyperparameters and general parameters
-#         # TODO: MC_Dropout_4. Do experiments and tune hyperparameters
-#         self.batch_size = 100
-#         self.lr_i = 1e-1  # Initial learning rate, the website sets it to 0.1 but the paper sets it to 10.0
-#         self.p_i = 5e-1  # Initial momentum
-#         self.p_f = 0.99
-#         self.gamma = 0.998
-#         self.K = 500
-#         self.num_epochs = 60  # 100
-#         # torch.manual_seed(0) # set seed for reproducibility
-#
-#         # TODO: MC_Dropout_1. Initialize the MC_Dropout network and optimizer here
-#         # You can check the Dummy Trainer above for intuition about what to do
-#         self.network = SelfMadeNetwork()
-#         self.network.to(device)
-#         self.train_loader = torch.utils.data.DataLoader(
-#             dataset_train, batch_size=self.batch_size, shuffle=True, drop_last=True
-#         )
-#         self.optimizer = SGDHinton(self.network.parameters(), self.lr_i, momentum=self.p_i)
-#
-#     def train(self):
-#         self.network.train()
-#         progress_bar = trange(self.num_epochs)
-#         for epoch in progress_bar:
-#             for batch_idx, (batch_x, batch_y) in enumerate(self.train_loader):
-#                 # batch_x are of shape (batch_size, 784), batch_y are of shape (batch_size,)
-#
-#                 # Try to put tensors on GPU
-#                 batch_x, batch_y = batch_x.to(device), batch_y.to(device)
-#
-#                 self.network.zero_grad()
-#                 # TODO: MC_Dropout_2. Implement MCDropout training here
-#                 # You need to calculate the loss based on the literature
-#                 output = self.network(batch_x)
-#                 loss = F.cross_entropy(output, batch_y)
-#
-#                 # Backpropagate to get the gradients
-#                 loss.backward()
-#
-#                 self.optimizer.step()
-#                 # Update progress bar with accuracy occasionally
-#                 if batch_idx % self.print_interval == 0:
-#                     current_logits = self.network(batch_x)
-#                     current_accuracy = (current_logits.argmax(axis=1) == batch_y).float().mean()
-#                     progress_bar.set_postfix(loss=loss.item(), acc=current_accuracy.item())
-#
-#             self.optimizer.param_groups[0]['lr'] = get_lr(epoch, self.lr_i, self.gamma)
-#             self.optimizer.param_groups[0]['momentum'] = get_momentum(epoch, self.p_i, self.p_f, self.K)
-#
-#     def predict_probabilities(self, x: torch.Tensor, num_sample=100) -> torch.Tensor:
-#         assert x.shape[1] == 28 ** 2
-#         self.network.eval()
-#
-#         # TODO: MC_Dropout_3. Implement your MC_dropout prediction here
-#         # You need to sample from your trained model here multiple times
-#         # in order to implement Monte Carlo integration
-#         scores = torch.stack([self.network(x) for _ in range(num_sample)])
-#         estimated_probability = torch.mean(scores, dim=0)
-#
-#         assert estimated_probability.shape == (x.shape[0], 10)
-#         return estimated_probability
 
 class DropoutTrainer(Framework):
     def __init__(self, dataset_train,
@@ -559,12 +358,9 @@ class DropoutTrainer(Framework):
                     current_accuracy = (current_logits.argmax(axis=1) == batch_y).float().mean()
                     progress_bar.set_postfix(loss=loss.item(), acc=current_accuracy.item())
 
-            # self.optimizer.param_groups[0]['lr'] = get_lr(epoch, self.lr_i, self.gamma)
-            # self.optimizer.param_groups[0]['momentum'] = get_momentum(epoch, self.p_i, self.p_f, self.K)
 
     def predict_probabilities(self, x: torch.Tensor, num_sample=100) -> torch.Tensor:
         assert x.shape[1] == 28 ** 2
-        #self.network.eval()
 
         # TODO: MC_Dropout_3. Implement your MC_dropout prediction here
         # You need to sample from your trained model here multiple times
@@ -575,6 +371,7 @@ class DropoutTrainer(Framework):
 
         assert estimated_probability.shape == (x.shape[0], 10)
         return estimated_probability
+
 
 class EnsembleTrainer(Framework):
     def __init__(self, dataset_train,
